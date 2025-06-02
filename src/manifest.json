@@ -34,7 +34,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["pages/offscreen/index.html"],
+      "resources": ["pages/offscreen/index.html", "pages/permission/index.html"],
       "matches": ["<all_urls>"]
     }
   ],

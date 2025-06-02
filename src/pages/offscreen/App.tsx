@@ -7,7 +7,7 @@ import React, { useEffect } from 'react';
 
 const App: React.FC = () => {
   useEffect(() => {
-    chrome.runtime.onMessage.addListener((message) => {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.target === 'offscreen') {
         switch (message.type) {
           case 'start-recording':
@@ -18,6 +18,12 @@ const App: React.FC = () => {
             console.error('OFFSCREEN stop-recording');
             stopRecording();
             break;
+          case 'test-microphone':
+            console.log('OFFSCREEN test-microphone');
+            testMicrophoneAccess().then(hasAccess => {
+              sendResponse({ hasAccess });
+            });
+            return true; // Keep the message channel open for async response
           default:
             throw new Error(`Unrecognized message: ${message.type}`);
         }
@@ -27,6 +33,18 @@ const App: React.FC = () => {
 
   let recorder: MediaRecorder | undefined;
   let data: Blob[] = [];
+
+  // Test if microphone access is available
+  async function testMicrophoneAccess(): Promise<boolean> {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop());
+      return true;
+    } catch (error) {
+      console.log('Microphone access test failed:', error);
+      return false;
+    }
+  }
 
   async function startRecording(streamId: string, orgId: string, micStreamId: string) {
     if (recorder?.state === 'recording') {
@@ -44,27 +62,35 @@ const App: React.FC = () => {
     } as any);
     console.error('OFFSCREEN media', media);
 
-    // FIXME: this causes error in recording, stops recording the offscreen
-    // const micMedia = await navigator.mediaDevices.getUserMedia({
-    //   audio: {
-    //     mandatory: {
-    //       chromeMediaSource: 'tab',
-    //       chromeMediaSourceId: micStreamId,
-    //     },
-    //   },
-    //   video: false,
-    // } as any);
+    // Try to get microphone access for recording
+    let micMedia: MediaStream | undefined;
+    try {
+      micMedia = await navigator.mediaDevices.getUserMedia({
+        audio: true, // Request actual microphone, not tab audio
+        video: false,
+      });
+      console.log('OFFSCREEN microphone access granted', micMedia);
+    } catch (error) {
+      console.log('OFFSCREEN microphone access failed:', error);
+      // Continue without microphone - just record tab audio
+    }
 
     // Continue to play the captured audio to the user.
     const output = new AudioContext();
     const source = output.createMediaStreamSource(media);
 
     const destination = output.createMediaStreamDestination();
-    // const micSource = output.createMediaStreamSource(micMedia);
 
     source.connect(output.destination);
     source.connect(destination);
-    // micSource.connect(destination);
+
+    // If we have microphone access, mix it in
+    if (micMedia) {
+      const micSource = output.createMediaStreamSource(micMedia);
+      micSource.connect(destination);
+      console.log('OFFSCREEN microphone mixed into recording');
+    }
+
     console.error('OFFSCREEN output', output);
 
     // Start recording.

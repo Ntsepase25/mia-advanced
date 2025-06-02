@@ -1,3 +1,63 @@
+// Check if microphone permission is available
+const checkMicrophonePermission = async (): Promise<boolean> => {
+  try {
+    // Check if we can access microphone by testing in offscreen
+    const existingContexts = await chrome.runtime.getContexts({});
+    const offscreenDocument = existingContexts.find((c) => c.contextType === 'OFFSCREEN_DOCUMENT');
+
+    if (offscreenDocument) {
+      // Send a message to offscreen to test microphone access
+      return new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          type: 'test-microphone',
+          target: 'offscreen',
+        }, (response) => {
+          resolve(response?.hasAccess || false);
+        });
+      });
+    }
+
+    return false;
+  } catch (error) {
+    console.error('Permission check failed:', error);
+    return false;
+  }
+};
+
+// Open permission request page
+const openPermissionPage = async (): Promise<void> => {
+  return new Promise((resolve) => {
+    chrome.tabs.create({
+      url: chrome.runtime.getURL('pages/permission/index.html'),
+      active: true
+    }, (tab) => {
+      if (tab.id) {
+        // Listen for tab updates to know when permission is granted
+        const onUpdated = (tabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+          if (tabId === tab.id && changeInfo.url) {
+            chrome.tabs.onUpdated.removeListener(onUpdated);
+            chrome.tabs.onRemoved.removeListener(onRemoved);
+            resolve();
+          }
+        };
+
+        const onRemoved = (tabId: number) => {
+          if (tabId === tab.id) {
+            chrome.tabs.onUpdated.removeListener(onUpdated);
+            chrome.tabs.onRemoved.removeListener(onRemoved);
+            resolve();
+          }
+        };
+
+        chrome.tabs.onUpdated.addListener(onUpdated);
+        chrome.tabs.onRemoved.addListener(onRemoved);
+      } else {
+        resolve();
+      }
+    });
+  });
+};
+
 const startRecordingOffscreen = async (tabId: number) => {
   const existingContexts = await chrome.runtime.getContexts({});
   let recording = false;
@@ -24,6 +84,21 @@ const startRecordingOffscreen = async (tabId: number) => {
     });
     chrome.action.setIcon({ path: 'icons/not-recording.png' });
     return;
+  }
+
+  // Check microphone permission before starting recording
+  const hasMicPermission = await checkMicrophonePermission();
+
+  if (!hasMicPermission) {
+    console.log('Microphone permission not granted, opening permission page...');
+    await openPermissionPage();
+
+    // Re-check permission after the page was opened
+    const hasPermissionNow = await checkMicrophonePermission();
+    if (!hasPermissionNow) {
+      console.error('Microphone permission still not granted');
+      return;
+    }
   }
 
   // Get a MediaStream for the active tab.
