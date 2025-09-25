@@ -60,7 +60,6 @@ const openPermissionPage = async (): Promise<void> => {
 
 const startRecordingOffscreen = async (tabId: number) => {
   const existingContexts = await chrome.runtime.getContexts({});
-  let recording = false;
 
   const offscreenDocument = existingContexts.find((c) => c.contextType === 'OFFSCREEN_DOCUMENT');
 
@@ -73,17 +72,6 @@ const startRecordingOffscreen = async (tabId: number) => {
       reasons: [chrome.offscreen.Reason.USER_MEDIA, chrome.offscreen.Reason.DISPLAY_MEDIA],
       justification: 'Recording from chrome.tabCapture API',
     });
-  } else {
-    recording = offscreenDocument.documentUrl?.endsWith('#recording') ?? false;
-  }
-
-  if (recording) {
-    chrome.runtime.sendMessage({
-      type: 'stop-recording',
-      target: 'offscreen',
-    });
-    chrome.action.setIcon({ path: 'icons/not-recording.png' });
-    return;
   }
 
   // Check microphone permission before starting recording
@@ -130,6 +118,19 @@ const startRecordingOffscreen = async (tabId: number) => {
   chrome.action.setIcon({ path: '/icons/recording.png' });
 };
 
+const stopRecordingOffscreen = async (tabId: number) => {
+  console.error('OFFSCREEN stopping recording');
+  
+  // Send stop message to offscreen document
+  chrome.runtime.sendMessage({
+    type: 'stop-recording',
+    target: 'offscreen',
+  });
+  
+  // Update icon to not recording state
+  chrome.action.setIcon({ path: 'icons/not-recording.png' });
+};
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'startRecording') {
     console.error('startRecording in background', JSON.stringify(message));
@@ -138,7 +139,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   } else if (message.action === 'stopRecording') {
     console.error('stopRecording in background');
-    startRecordingOffscreen(message.tabId);
+    stopRecordingOffscreen(message.tabId);
     return true;
   } else if (message.action === 'set-recording') {
     console.error('set-recording in background', message.recording);
