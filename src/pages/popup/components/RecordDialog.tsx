@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { authClient } from '../../../lib/auth-client';
 
 export const RecordDialog: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<string>('');
+  const {data: session, isPending} = authClient.useSession()
 
   useEffect(() => {
     chrome.storage.session.get('recording', (result) => {
@@ -57,34 +59,40 @@ export const RecordDialog: React.FC = () => {
   const getPermissionStatusText = () => {
     switch (permissionStatus) {
       case 'granted':
-        return '🎤 Microphone access granted';
+        return ' Microphone access granted';
       case 'denied':
-        return '🚫 Microphone access denied';
+        return ' Microphone access denied';
       case 'prompt':
-        return '❓ Microphone permission required';
+        return 'Microphone permission required';
       default:
-        return '🔍 Checking microphone access...';
+        return ' Checking microphone access...';
     }
   };
 
+  if (isPending) {
+    return <div>Loading...</div>;
+  }
+
   return (
     <div style={{ padding: '20px', minWidth: '250px' }}>
-      <div style={{ marginBottom: '15px' }}>
-        <h3>Google Meet Recorder</h3>
+
+      
+      <div className="">
+        {/* <h1 className="">MIA</h1> */}
+        <p className="" style={{color: "#666"}}><span style={{fontWeight: "bold", fontSize: "24px", color: "black"}}>MIA</span><br /><br />Meeting Minutes Assistant.<br /><br /> Designed  to  automate taking minutes for meetings  </p>
+ 
       </div>
       
-      <div style={{ marginBottom: '15px', fontSize: '12px', color: '#666' }}>
-        {getPermissionStatusText()}
-      </div>
       
-      <div>
+      
+      <div style={{display: "flex", gap: "2px"}}>
         <button 
           onClick={handleRecordClick}
           disabled={isChecking}
           style={{
             width: '100%',
             padding: '10px',
-            backgroundColor: isRecording ? '#f44336' : '#4CAF50',
+            backgroundColor: isRecording ? '#f44336' : '#6750a4',
             color: 'white',
             border: 'none',
             borderRadius: '4px',
@@ -94,7 +102,17 @@ export const RecordDialog: React.FC = () => {
           {isChecking ? 'Checking permissions...' : 
            isRecording ? 'Stop Recording' : 'Start Recording'}
         </button>
+        {!session && (
+        <button style={{border: "none", borderRadius: "4px"}}><a style={{width: "100%",color :'black', textDecoration: "none", border: "none"}} href='http://localhost:5173/sign-in' target='_blank'>Login</a></button>
+        )}
       </div>
+
+      {/* <div style={{ marginBottom: '15px', fontSize: '12px', color: '#666' }}>
+        {getPermissionStatusText()}
+      </div> */}
+      <p style={{color: "#666"}}>
+        Recording is transcribed automatically when logged in
+      </p>
       
       {permissionStatus === 'denied' && (
         <div style={{ marginTop: '10px', fontSize: '12px', color: '#f44336' }}>
