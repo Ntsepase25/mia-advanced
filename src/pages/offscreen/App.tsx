@@ -12,7 +12,7 @@ const App: React.FC = () => {
         switch (message.type) {
           case 'start-recording':
             console.error('OFFSCREEN start-recording');
-            startRecording(message.data, message.orgId, message.micStreamId);
+            startRecording(message.data, message.userId, message.micStreamId, message.tabUrl);
             break;
           case 'stop-recording':
             console.error('OFFSCREEN stop-recording');
@@ -20,7 +20,7 @@ const App: React.FC = () => {
             break;
           case 'test-microphone':
             console.log('OFFSCREEN test-microphone');
-            testMicrophoneAccess().then(hasAccess => {
+            testMicrophoneAccess().then((hasAccess) => {
               sendResponse({ hasAccess });
             });
             return true; // Keep the message channel open for async response
@@ -33,12 +33,43 @@ const App: React.FC = () => {
 
   let recorder: MediaRecorder | undefined;
   let data: Blob[] = [];
+  let tabMedia: MediaStream | undefined;
+  let micMedia: MediaStream | undefined;
+  // Add variables to store meeting context
+  let meetingId: string | undefined;
+  let userId: string | undefined;
+  let recordingStartTime: number | undefined;
+
+  // Function to extract meeting ID from Google Meet URL
+  function extractMeetingId(url: string): string | undefined {
+    try {
+      const urlObj = new URL(url);
+
+      if (urlObj.hostname === 'meet.google.com') {
+        const pathname = urlObj.pathname;
+
+        // Handle different Google Meet URL formats
+        if (pathname.startsWith('/lookup/')) {
+          // Format: https://meet.google.com/lookup/meetingcode
+          return pathname.split('/lookup/')[1];
+        } else if (pathname.length > 1) {
+          // Format: https://meet.google.com/abc-defg-hij
+          return pathname.substring(1); // Remove leading slash
+        }
+      }
+
+      return undefined;
+    } catch (error) {
+      console.error('Failed to parse URL:', error);
+      return undefined;
+    }
+  }
 
   // Test if microphone access is available
   async function testMicrophoneAccess(): Promise<boolean> {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(track => track.stop());
+      stream.getTracks().forEach((track) => track.stop());
       return true;
     } catch (error) {
       console.log('Microphone access test failed:', error);
@@ -46,12 +77,26 @@ const App: React.FC = () => {
     }
   }
 
-  async function startRecording(streamId: string, orgId: string, micStreamId: string) {
+  async function startRecording(
+    streamId: string,
+    userId: string,
+    micStreamId: string,
+    tabUrl?: string
+  ) {
     if (recorder?.state === 'recording') {
       throw new Error('Called startRecording while recording is in progress.');
     }
 
-    const media = await navigator.mediaDevices.getUserMedia({
+    // Store the organization ID
+    userId = userId;
+
+    // Extract meeting ID from the tab URL if provided
+    if (tabUrl) {
+      meetingId = extractMeetingId(tabUrl);
+      console.log('Extracted meeting ID:', meetingId);
+    }
+
+    tabMedia = await navigator.mediaDevices.getUserMedia({
       audio: {
         mandatory: {
           chromeMediaSource: 'tab',
@@ -60,24 +105,23 @@ const App: React.FC = () => {
       },
       video: false,
     } as any);
-    console.error('OFFSCREEN media', media);
+    console.error('OFFSCREEN media', tabMedia);
 
     // Try to get microphone access for recording
-    let micMedia: MediaStream | undefined;
     try {
       micMedia = await navigator.mediaDevices.getUserMedia({
-        audio: true, // Request actual microphone, not tab audio
+        audio: true,
         video: false,
       });
       console.log('OFFSCREEN microphone access granted', micMedia);
     } catch (error) {
       console.log('OFFSCREEN microphone access failed:', error);
-      // Continue without microphone - just record tab audio
+      micMedia = undefined;
     }
 
     // Continue to play the captured audio to the user.
     const output = new AudioContext();
-    const source = output.createMediaStreamSource(media);
+    const source = output.createMediaStreamSource(tabMedia);
 
     const destination = output.createMediaStreamDestination();
 
@@ -105,13 +149,44 @@ const App: React.FC = () => {
         recording: false,
       });
 
-      window.open(URL.createObjectURL(blob), '_blank');
+      const formData = new FormData();
+      formData.append('recording', blob);
+
+      // Add meeting ID and user ID to the form data
+      if (meetingId) {
+        formData.append('meetingId', meetingId);
+      }
+      if (userId) {
+        formData.append('userId', userId);
+      }
+
+      // Add timestamp and additional metadata
+      formData.append('timestamp', new Date().toISOString());
+
+      // Add metadata as JSON for more complex data
+      formData.append(
+        'metadata',
+        JSON.stringify({
+          meetingId: meetingId || null,
+          userId: userId || null,
+          timestamp: new Date().toISOString(),
+          recordingDuration: recordingStartTime ? Date.now() - recordingStartTime : 0,
+          hasMicrophone: micMedia ? true : false,
+          meetingPlatform: meetingId ? 'google-meet' : 'unknown',
+        })
+      );
+
+      fetch('http://localhost:8080/recordings/save', {
+        method: 'post',
+        body: formData,
+      });
 
       // Clear state ready for next recording
       recorder = undefined;
       data = [];
     };
     recorder.start();
+    recordingStartTime = Date.now();
 
     console.error('OFFSCREEN recorder started', recorder);
 
@@ -132,8 +207,14 @@ const App: React.FC = () => {
   async function stopRecording() {
     recorder?.stop();
 
-    // Stopping the tracks makes sure the recording icon in the tab is removed.
+    // Stop all tracks from both streams
     recorder?.stream.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+    tabMedia?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+    micMedia?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+
+    // Clear references
+    tabMedia = undefined;
+    micMedia = undefined;
 
     // Update current state in URL
     window.location.hash = '';

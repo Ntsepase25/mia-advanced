@@ -58,7 +58,7 @@ const openPermissionPage = async (): Promise<void> => {
   });
 };
 
-const startRecordingOffscreen = async (tabId: number) => {
+const startRecordingOffscreen = async (tabId: number, orgId?: string) => {
   const existingContexts = await chrome.runtime.getContexts({});
 
   const offscreenDocument = existingContexts.find((c) => c.contextType === 'OFFSCREEN_DOCUMENT');
@@ -107,12 +107,17 @@ const startRecordingOffscreen = async (tabId: number) => {
   });
   console.error('BACKGROUND micStreamId', micStreamId);
 
+  // Get the tab information to extract URL
+  const tab = await chrome.tabs.get(tabId);
+  
   // Send the stream ID to the offscreen document to start recording.
   chrome.runtime.sendMessage({
     type: 'start-recording',
     target: 'offscreen',
     data: streamId,
     micStreamId,
+    tabUrl: tab.url,
+    orgId: orgId || 'default-org', // Use provided orgId or default
   });
 
   chrome.action.setIcon({ path: '/icons/recording.png' });
@@ -134,8 +139,7 @@ const stopRecordingOffscreen = async (tabId: number) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'startRecording') {
     console.error('startRecording in background', JSON.stringify(message));
-    startRecordingOffscreen(message.tabId);
-    // startRecording(message.tabId, message.orgId);
+    startRecordingOffscreen(message.tabId, message.userId);
     return true;
   } else if (message.action === 'stopRecording') {
     console.error('stopRecording in background');
